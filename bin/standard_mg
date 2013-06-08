@@ -1,0 +1,95 @@
+#!/usr/bin/env ruby
+# -*- coding: utf-8 -*-
+
+# This is a sample program to use a standard minority game.
+
+$LOAD_PATH.unshift File.expand_path(File.dirname(__FILE__) + '/../lib')
+
+require 'optparse'
+
+require 'minority_game'
+require 'minority_game/game/standard_mg'
+require 'minority_game/player/standard_player'
+
+include MinorityGame
+
+# default args
+d, m, n, ptype, r, s, t = false, DEFAULT_M, DEFAULT_N, "StandardPlayer", 0,
+  DEFAULT_S, DEFAULT_T
+
+# parse command line options.
+OptionParser.new do |o|
+  o.on("-d", "--debug", "debug option") { |v| d = v }
+  o.on("-m MEMORY", "--memory=MEMORY", "specify a memory size of the number " +
+       "of the history that players store") { |v| m = v.to_i }
+  o.on("-n NUM_PLAYER", "--number=NUM_PLAYER",
+       "specify a number of the players") { |v| n = v.to_i }
+  o.on("-p PLAYER", "--player=PLAYER",
+       "specify a player type from 'StandardPlayer' or 'RandomPlayer'.") { |v|
+    ptype = v }
+  o.on("-r RANDSEED", "--randseed=RANDSEED",
+       "specify a random seed number.") { |v| r = v.to_i }
+  o.on("-s STRATEGY", "--strategy=STRATEGY", "specify a number of strateges " +
+       "that players have") { |v| s = v.to_i }
+  o.on("-t TRIAL", "--trial=TRIAL", "specify a number of the trial thath the " +
+       "game is examined") { |v| t = v.to_i }
+  begin
+    o.parse!
+  rescue
+    STDERR.puts "Invalid option!"
+    puts "#{o}"
+    exit
+  end
+end
+
+puts "--- initial settings ---"
+puts "m: #{m}, n: #{n}, ptype: #{ptype}, randseed: #{r}, s: #{s}, t: #{t}"
+puts "--- outputs ---"
+
+# initialize the standard minority game.
+g = MinorityGame::StandardMinorityGame.new(m, n, s, r, {player_type: ptype})
+
+# examine the game!
+g.examine(t)
+
+# print the state of players
+g.players.each { |p| puts p } if d
+
+# mean of the number of winners.
+mean_winners = 1.0 * g.n_winner_history.inject(:+) / g.n_winner_history.length
+puts "mean winners: #{mean_winners}"
+
+# standard diviation of the number of winners.
+diviation_winners = Math.sqrt(g.n_winner_history.inject(0) { |sum, i|
+    sum += (mean_winners - i)**2 } / g.n_winner_history.length)
+puts "diviation winners: #{diviation_winners}"
+
+# sorted number of wins each player.
+wins = ((g.players.inject([]) { |a, p| a.push((p.reward + t) / 2) }).sort)
+  .reverse
+puts "rank of wins each players: #{wins}" if d
+
+exit if ptype != "StandardPlayer"
+
+# strategy
+strategy_continuous_use = []
+g.players.each do |player|
+  pscu = []
+  cs = player.strategy_history[0]
+  count = 1
+  player.strategy_history[1..player.strategy_history.length - 1].each do |st|
+    if st != cs
+      pscu.push(count)
+      cs = st
+      count = 1
+    else
+      count += 1
+    end
+  end
+  strategy_continuous_use.push(pscu)
+end
+
+# this array stores how many times players use same strategy.
+puts "strategy_continuous_use: #{strategy_continuous_use}" if d
+
+puts "number of winners each process: #{g.n_winner_history}" if d

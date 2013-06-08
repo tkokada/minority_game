@@ -1,0 +1,94 @@
+#!/usr/bin/env ruby
+# -*- coding: utf-8 -*-
+
+# This is a sample program to use a learning minority game
+
+$LOAD_PATH.unshift File.expand_path(File.dirname(__FILE__) + '/../lib')
+
+require 'optparse'
+
+require 'minority_game'
+require 'minority_game/game/learning_mg'
+require 'minority_game/player/learning_player'
+
+
+include MinorityGame
+
+# default args
+a, d, m, n, r, s, t = DEFAULT_ALPHA, false, DEFAULT_M, DEFAULT_N, 0, DEFAULT_S,
+  DEFAULT_T
+
+# parse command line options.
+OptionParser.new do |o|
+  o.on("-a ALPHA", "--alpha=ALPHA",
+       "specify a learning speed alpha [0.0 - 1.0]") {|v| a = v.to_f}
+  o.on("-d", "--debug", "debug option") {|v| d = v}
+  o.on("-m MEMORY", "--memory=MEMORY", "specify a memory size of the number " +
+       "of the history that players store") {|v| m = v.to_i}
+  o.on("-n NUM_PLAYER", "--number=NUM_PLAYER",
+       "specify a number of the players") {|v| n = v.to_i}
+  o.on("-r RANDSEED", "--randseed=RANDSEED",
+       "specify a random seed number.") {|v| r = v.to_i}
+  o.on("-s STRATEGY", "--strategy=STRATEGY", "specify a number of strateges " +
+       "that players have") {|v| s = v.to_i}
+  o.on("-t TRIAL", "--trial=TRIAL", "specify a number of the trial thath the " +
+       "game is examined") {|v| t = v.to_i}
+  begin
+    o.parse!
+  rescue
+    STDERR.puts "Invalid option!"
+    STDERR.puts "#{o}"
+    exit
+  end
+end
+
+puts "--- initial settings ---"
+puts "alpha: #{a}, m: #{m}, n: #{n}, randseed: #{r}, s: #{s}, t: #{t}"
+puts "--- outputs ---"
+
+#initialize the learning minority game.
+g = MinorityGame::LearningMinorityGame.new(m, n, s, r, {alpha: a})
+
+# examine the game!
+g.examine(t)
+
+# print the state of players
+g.players.each { |p| puts p } if d
+
+# mean of the number of winners.
+mean_winners = 1.0 * g.n_winner_history.inject(:+) / g.n_winner_history.length
+
+puts "mean winners: #{mean_winners}"
+
+# standard diviation of the number of winners.
+diviation_winners = Math.sqrt(g.n_winner_history.inject(0) { |sum, i|
+    sum += (mean_winners - i)**2 } / g.n_winner_history.length)
+puts "diviation winners: #{diviation_winners}"
+
+# sorted number of wins each player.
+wins = ((g.players.inject([]) { |ar, p| ar.push((p.reward + t) / 2) }).sort)
+  .reverse
+puts "rank of wins each players: #{wins}" if d
+
+# strategy
+strategy_continuous_use = []
+g.players.each do |player|
+  pscu = []
+  cs = player.strategy_history[0]
+  count = 1
+  player.strategy_history[1..player.strategy_history.length - 1].each do |st|
+    if st != cs
+      pscu.push(count)
+      cs = st
+      count = 1
+    else
+      count += 1
+    end
+  end
+  strategy_continuous_use.push(pscu)
+end
+
+# this array stores how many times players use same strategy.
+puts "strategy_continuous_use: #{strategy_continuous_use}" if d
+
+puts "number of winners each process: #{g.n_winner_history}" if d

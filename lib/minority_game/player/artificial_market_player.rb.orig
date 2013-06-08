@@ -1,0 +1,230 @@
+#!/usr/bin/env ruby
+# -*- coding: utf-8 -*-
+
+require 'minority_game'
+require 'minority_game/player/standard_player'
+require 'minority_game/player/learning_player'
+
+
+module MinorityGame
+
+  class ArtificialMarketPlayer < StandardPlayer
+
+    # attr_reader :alpha          # learning rate
+    # attr_reader :env            # reference to game
+
+    #=== initialize method
+    def initialize(id, m, s, history_table, arg_hash = nil, env = nil)
+      super(id, m, s, history_table, arg_hash)
+      @alpha = get_arghash(arg_hash, :alpha, DEFAULT_ALPHA)
+      @env = env
+    end
+
+    #=== string method
+    def to_s
+      return "%s%5d reward: %5d, decision: %s, strategy: %d, scores: " \
+          "#{@strategy_scores}" % [self.class.name.split(/::/)[1], @id, @reward,
+            @current_decision, @current_strategy]
+    end
+  end
+
+  #=== same with LearningPlayer
+  class ChartistPlayer < ArtificialMarketPlayer
+
+    #=== update the player with the result and the reward
+    #result :: winner
+    #reward :: reward for the player
+    def update(result, reward)
+      @strategy_scores[@current_strategy] += reward
+      @reward += reward
+      if reward < 0 and $random.rand < @alpha
+        @strategies[@current_strategy][@strategies[@current_strategy]
+            .index([@history, @current_decision])][1] ^= 1
+      end
+      @history = @history[1..@history.length - 1] + result.to_s
+      @strategy_history.push(@current_strategy)
+      @strategy_scores.length.times.each do |i|
+        @strategy_scores_history[i].push(@strategy_scores[i])
+      end
+    end
+  end
+
+
+  class HandImitatorPlayer < ArtificialMarketPlayer
+
+    # # learning speed of imitation
+    # attr_reader :alpha
+    # # learning speed of pbuy
+    # attr_reader :beta
+    # # learning speed of R
+    # attr_reader :gamma
+    # # buying probability
+    # attr_reader :pbuy
+    # # buying probability of other players
+    # attr_reader :pbuys
+    # # total rewards
+    # attr_reader :rs
+
+    #=== initialize method
+    def initialize(id, m, s, history_table, arg_hash = nil, env = nil)
+      super(id, m, s, history_table, arg_hash, env)
+      #@alpha = get_arghash(arg_hash, :alpha, DEFAULT_ALPHA)
+      @beta = get_arghash(arg_hash, :beta, DEFAULT_BETA)
+      @gamma = get_arghash(arg_hash, :gamma, DEFAULT_GAMMA)
+      # probability for buying
+      @pbuy = get_arghash(arg_hash, :pbuy, 0.5)
+      # probability for buying of other players
+      @pbuys = []
+      # total rewards
+      @rs = []
+      @env.n.times { |i| @pbuys << @pbuy; @rs << 0 }
+    end
+
+    #=== determine whether buying or selling depending on pbuy
+    def decision_make
+      if $random.rand < @pbuy
+        return @current_decision = 1
+      else
+        return @current_decision = 0
+      end
+    end
+
+    #=== update the player with the result and the reward
+    #result :: winner
+    #reward :: reward for the player
+    def update(result, reward)
+      @strategy_scores[@current_strategy] += reward
+      @reward += reward
+      # update pbuys and rs
+      @env.n.times do |i|
+        @pbuys[i] = (1 - @beta) * @pbuys[i] + @beta * @env.decisions[i]
+      end
+      @env.n.times do |i|
+        @rs[i] = (1 - @gamma) * @rs[i] + @gamma * @env.rewards[i]
+      end
+      # update pbuy with probability alpha
+      if $random.rand < @alpha
+        rsa = @rs.map { |i| i - @rs.min }
+        index = nil
+        if rsa.max <= 0
+          #p "######## rsa max : #{rsa.max}, #{rsa}"
+          index = $random.rand(rsa.length)
+        elsif rsa.max == rsa.min
+          #p "######## rsa max: #{rsa.max}, min: #{rsa.min}, #{rsa}"
+          index = $random.rand(rsa.length)
+        else
+          rsa = rsa.map {|i| i / rsa.max}
+          rs_total = rsa.inject(0.0) {|s, i| s += i}
+          begin
+            v = $random.rand(rs_total)
+          rescue Exception => e
+            STDERR.puts e.message
+            STDERR.puts e.backtrace
+            STDERR.puts "rsa: #{rsa}, rs_toal: #{rs_total}"
+            exit
+          end
+          c = 0
+          (0..(rsa.length - 1)).each do |i|
+            c += rsa[i]
+            if v <= c
+              index = i
+              break
+            end
+          end
+        end
+        if index.nil?
+          p "index nil, v: #{v}, c: #{c}, rsa: #{rsa}, total: #{rs_total}"
+        end
+        #p "old: #{@pbuy}, index: #{index}, new: #{@pbuys[index]}"
+        @pbuy = @pbuys[index]
+      end
+      @history = @history[1..@history.length - 1] + result.to_s
+    end
+  end
+
+
+  class StrategyImitatorPlayer < ArtificialMarketPlayer
+
+    # attr_reader :alpha           # learning speed of imitation
+    # attr_reader :beta            # learning speed of pbuy
+    # attr_reader :gamma           # learning speed of R
+    # attr_reader :ss              # predicted strategies of other players
+    # attr_reader :rs              # total rewards
+
+    #=== initialize method
+    def initialize(id, m, s, history_table, arg_hash=nil, env=nil)
+      super(id, m, s, history_table, arg_hash, env)
+      #@alpha = get_arghash(arg_hash, :alpha, 0.8)
+      @beta = get_arghash(arg_hash, :beta, 0.2)
+      @gamma = get_arghash(arg_hash, :gamma, 0.5)
+      @ss, @rs = [], []
+      @env.n.times do |i|
+        @ss << (1..2 ** m).map { |c| $random.rand(2) }
+        @rs << 0
+      end
+    end
+
+    #=== determine the strategy of best score and make a decision
+    def decision_make
+      return @current_decision =
+        @ss[@current_strategy][@env.history_table.index(@history)]
+    end
+
+    #=== update the player with the result and the reward
+    #result :: winner
+    #reward :: reward for the player
+    def update(result, reward)
+      @reward += reward
+      # update ss and rs
+      @env.n.times do |i|
+        if @ss[i][@env.history_table.index(@history)] != result and $random.rand < @beta
+          @ss[i][@env.history_table.index(@history)] ^= 1
+        end
+      end
+      @env.n.times do |i|
+        @rs[i] = (1 - @gamma) * @rs[i] + @gamma * @env.rewards[i]
+      end
+      # update pbuy with probability alpha
+      if $random.rand < @alpha
+        rsa = @rs.map {|i| i - @rs.min}
+        index = nil
+        if rsa.max <= 0
+          #p "######## rsa max : #{rsa.max}, #{rsa}"
+          index = $random.rand(rsa.length)
+        elsif rsa.max == rsa.min
+          #p "######## rsa max: #{rsa.max}, min: #{rsa.min}, #{rsa}"
+          index = $random.rand(rsa.length)
+        else
+          rsa = rsa.map {|i| i / rsa.max}
+          rs_total = rsa.inject(0.0) {|s, i| s += i}
+          begin
+            v = $random.rand(rs_total)
+          rescue Exception => e
+            STDERR.puts e.message
+            STDERR.puts e.backtrace
+            STDERR.puts "rsa: #{rsa}, rs_toal: #{rs_total}"
+            exit
+          end
+          c = 0
+          (0..(rsa.length - 1)).each do |i|
+            c += rsa[i]
+            if v <= c
+              index = i
+              break
+            end
+          end
+        end
+        if index.nil?
+          p "index nil, v: #{v}, c: #{c}, rsa: #{rsa}, total: #{rs_total}"
+        end
+        #p "old: #{@pbuy}, index: #{index}, new: #{@pbuys[index]}"
+        @current_strategy = index
+      end
+      @history = @history[1..@history.length - 1] + result.to_s
+    end
+  end
+
+  #=== may be implemented in futre :D
+  class PerfectPredictorPlayer < ArtificialMarketPlayer
+  end
+end
